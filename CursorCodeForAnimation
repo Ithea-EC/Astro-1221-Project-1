@@ -1,0 +1,308 @@
+import matplotlib
+matplotlib.use('TkAgg')  # Force window popup
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import json
+import random
+import math
+
+# --- 1. THE CLASSES ---
+
+class Star:
+    def __init__(self, star_id, azimuth, altitude, magnitude):
+        self.id = star_id
+        self.azimuth = azimuth   # Angle in radians (0 to 2pi)
+        self.altitude = altitude # Distance from center (0 to 1)
+        self.magnitude = magnitude
+        self.update_xy()
+
+    def update_xy(self):
+        """Recalculates X/Y coordinates based on current Azimuth/Altitude."""
+        self.x = self.altitude * np.cos(self.azimuth)
+        self.y = self.altitude * np.sin(self.azimuth)
+    
+    def distance_to(self, other_star):
+        return math.sqrt((self.x - other_star.x)**2 + (self.y - other_star.y)**2)
+
+    def rotate(self, hours):
+        """Rotates the star. Earth rotates 15 degrees (pi/12 radians) per hour."""
+        rotation_speed = np.pi / 12 
+        self.azimuth += (hours * rotation_speed)
+        self.azimuth %= (2 * np.pi)
+        self.update_xy()
+
+    def to_dict(self):
+        return {
+            "id": self.id, "azimuth": self.azimuth, 
+            "altitude": self.altitude, "magnitude": self.magnitude
+        }
+
+class Constellation:
+    def __init__(self, cid, stars=None, mythology="Unknown"):
+        self.cid = cid
+        self.stars = stars if stars else [] 
+        self.mythology = mythology
+    
+    def add_star(self, star):
+        if star not in self.stars:
+            self.stars.append(star)
+            
+    def get_center(self):
+        """Calculates center point using vector math to handle wrapping."""
+        if not self.stars: return 0, 0
+        
+        xs = [s.altitude * np.cos(s.azimuth) for s in self.stars]
+        ys = [s.altitude * np.sin(s.azimuth) for s in self.stars]
+        
+        mean_x = np.mean(xs)
+        mean_y = np.mean(ys)
+        
+        center_alt = np.sqrt(mean_x**2 + mean_y**2)
+        center_az = np.arctan2(mean_y, mean_x)
+        
+        return center_az, center_alt
+
+    def to_dict(self):
+        return {
+            "id": self.cid,
+            "star_ids": [s.id for s in self.stars],
+            "mythology": self.mythology
+        }
+
+# --- 2. THE GENERATORS ---
+
+def generate_stars(num_stars=150, seed=None):
+    if seed: np.random.seed(seed)
+    stars = []
+    
+    azimuths = np.random.uniform(0, 2*np.pi, num_stars)
+    altitudes = np.sqrt(np.random.uniform(0, 1, num_stars)) 
+    magnitudes = np.random.exponential(scale=2.0, size=num_stars) + 1
+    magnitudes = np.clip(magnitudes, 1, 6)
+    
+    for i in range(num_stars):
+        stars.append(Star(i, azimuths[i], altitudes[i], magnitudes[i]))
+    return stars
+
+def get_bright_field(star_list, threshold=5.5):
+    """Requirement: Filters stars using a list comprehension."""
+    return [s for s in star_list if s.magnitude <= threshold]
+
+def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
+    """Finds chains of bright stars, ensuring they don't overlap."""
+    constellations = []
+    used_ids = set()
+    c_count = 1
+    
+    sorted_stars = sorted(star_list, key=lambda s: s.magnitude)
+    
+    def is_trespassing(target_star):
+        for const in constellations:
+            for existing_star in const.stars:
+                if target_star.distance_to(existing_star) < min_spacing:
+                    return True
+        return False
+        
+    for anchor in sorted_stars:
+        if anchor.id in used_ids or anchor.magnitude > 4.0: 
+            continue
+            
+        if is_trespassing(anchor):
+            continue
+            
+        new_const = Constellation(c_count)
+        new_const.add_star(anchor)
+        
+        temp_used = {anchor.id}
+        current_star = anchor
+        
+        for _ in range(12):
+            best_candidate = None
+            closest_dist = max_distance
+            
+            for candidate in star_list:
+                if candidate.id in used_ids or candidate.id in temp_used: 
+                    continue
+                if is_trespassing(candidate):
+                    continue
+                if candidate.magnitude > 4.5:
+                    continue
+                    
+                d = current_star.distance_to(candidate)
+                if d < closest_dist:
+                    closest_dist = d
+                    best_candidate = candidate
+            
+            if best_candidate:
+                new_const.add_star(best_candidate)
+                temp_used.add(best_candidate.id)
+                current_star = best_candidate 
+            else:
+                break 
+        
+        if len(new_const.stars) >= 3:
+            constellations.append(new_const)
+            used_ids.update(temp_used) 
+            c_count += 1
+            
+    return constellations
+
+# --- 3. THE STORYTELLER ---
+
+class StoryTeller:
+    def __init__(self):
+        self.origins = ["placed by the gods as a warning", "born from the tears of a giant", "a hero immortalized in light", "forged in the fires of creation", "left behind by an ancient civilization", "drawn from the dreams of a sleeping titan"]
+        self.actions = ["chasing the western wind", "guarding the forbidden gate", "searching for its lost kin", "weeping for a lost love", "pointing the way to the afterlife", "waiting for the final dawn"]
+        self.details = ["The central star burns red with anger.", "It vanishes during the winter solstice.", "Sailors use its tail to navigate.", "The three stars form a perfect triangle.", "It is said to blink when danger approaches.", "Ancient kings believed it brought fortune."]
+        self.nouns = ["Dragon", "Serpent", "Crown", "Arrow", "Lyre", "Ship", "Bear", "Wolf", "Chalice", "Sword", "Phoenix", "Eagle", "Lion", "Hunter", "Maiden", "Titan", "Leviathan", "Owl"]
+        self.adjectives = ["Silent", "Weeping", "Golden", "Broken", "Celestial", "Burning", "Frozen", "Hollow", "Fallen", "Eternal", "Crimson", "Shadowy", "Radiant", "Ancient", "Wandering"]
+        self.used_names = set()
+
+    def generate_myth(self, constellation):
+        while True:
+            name = f"The {random.choice(self.adjectives)} {random.choice(self.nouns)}"
+            if name not in self.used_names:
+                self.used_names.add(name)
+                break 
+                
+        paragraph = f"Legend says {name} was {random.choice(self.origins)}. It is eternally {random.choice(self.actions)}. {random.choice(self.details)}"
+        return name, paragraph
+
+# --- 4. ANIMATION FUNCTION ---
+
+def animate_sky(stars, constellations, interval=50):
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, projection='polar')
+
+    ax.set_facecolor('#000010')
+    ax.set_theta_zero_location("N")
+    ax.set_theta_direction(-1)
+    
+    ax.grid(True, color='cyan', alpha=0.25, linestyle=':') 
+    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0]) 
+    ax.set_yticklabels([]) 
+    ax.set_xticks(np.linspace(0, 2*np.pi, 8, endpoint=False))
+    ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'], color='#8888AA')
+
+    # Visual Polish: Draw the celestial horizon line
+    horizon_angles = np.linspace(0, 2*np.pi, 100)
+    ax.plot(horizon_angles, np.ones(100), color='cyan', linestyle='--', alpha=0.3, lw=1)
+
+    initial_az = [s.azimuth for s in stars]
+    initial_alt = [s.altitude for s in stars]
+    
+    sizes = [0.6 * (7 - s.magnitude)**2.5 for s in stars]
+    glow_sizes = [s * 4 for s in sizes]
+    colors = plt.cm.plasma_r(np.array([s.magnitude for s in stars]) / 6)
+    
+    scatter_glow = ax.scatter(initial_az, initial_alt, s=glow_sizes, c=colors, alpha=0.2, zorder=9)
+    scatter_core = ax.scatter(initial_az, initial_alt, s=sizes, c='white', alpha=0.9, zorder=10)
+
+    const_lines = []
+    const_fills = []
+    const_labels = []
+
+    for c in constellations:
+        line, = ax.plot([], [], color='cyan', lw=2.0, alpha=0.9)
+        const_lines.append(line)
+        fill, = ax.fill([], [], color='cyan', alpha=0.15)
+        const_fills.append(fill)
+        
+        if len(c.stars) >= 5:
+            c_name = c.mythology.split(":")[0] if ":" in c.mythology else f"Constellation {c.cid}"
+            center_az, center_alt = c.get_center()
+            lbl = ax.text(center_az, center_alt, c_name, color='#AAFFFF', 
+                          fontsize=9, ha='center', va='center', fontweight='bold',
+                          bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
+            const_labels.append((lbl, c))
+
+    time_display = ax.set_title("Simulating Time...", color='white', fontsize=16, fontweight='bold', pad=30)
+
+    start_time_hours = 21.0
+    time_step = 0.05
+
+    def update(frame):
+        for s in stars:
+            s.rotate(time_step)
+
+        new_az = [s.azimuth for s in stars]
+        new_alt = [s.altitude for s in stars]
+        scatter_core.set_offsets(np.c_[new_az, new_alt])
+        scatter_glow.set_offsets(np.c_[new_az, new_alt])
+
+        for i, const in enumerate(constellations):
+            c_az = [s.azimuth for s in const.stars]
+            c_alt = [s.altitude for s in const.stars]
+            if len(const.stars) > 2:
+                c_az.append(const.stars[0].azimuth)
+                c_alt.append(const.stars[0].altitude)
+            const_lines[i].set_data(c_az, c_alt)
+            const_fills[i].set_xy(np.column_stack([c_az, c_alt]))
+            
+        for lbl, const in const_labels:
+            lbl.set_position(const.get_center())
+
+        current_time = start_time_hours + (frame * time_step)
+        current_time_wrapped = current_time % 24 
+        hour_24 = int(current_time_wrapped)
+        minute = int(round((current_time_wrapped - hour_24) * 60))
+        am_pm = "AM" if hour_24 < 12 else "PM"
+        hour_12 = hour_24 % 12
+        if hour_12 == 0: hour_12 = 12
+        time_display.set_text(f"Simulated Time: {hour_12:02d}:{minute:02d} {am_pm}")
+        
+        return [scatter_core, scatter_glow, time_display] + const_lines + const_fills + [l[0] for l in const_labels]
+
+    ani = FuncAnimation(fig, update, frames=200, interval=interval, blit=False)
+    return ani
+
+# --- 5. FILE I/O WITH ERROR HANDLING ---
+
+def save_universe(filename, stars, constellations):
+    """Saves universe with error handling for file permissions or empty data."""
+    if not stars or not constellations:
+        print("Error: Attempted to save an empty universe.")
+        return
+
+    try:
+        data = {
+            "stars": [s.to_dict() for s in stars],
+            "constellations": [c.to_dict() for c in constellations]
+        }
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+        print(f"Universe successfully saved to {filename}")
+    except (IOError, PermissionError) as e:
+        print(f"CRITICAL ERROR: Could not save file. Technical details: {e}")
+
+# --- MAIN EXECUTION ---
+
+if __name__ == "__main__":
+    print("--- STEP 1: GENESIS ---")
+    full_sky = generate_stars(num_stars=800, seed=None)
+    # Use the magnitude filter (List Comprehension requirement)
+    sky = get_bright_field(full_sky, threshold=5.8)
+    print(f"Generated {len(full_sky)} total stars. Filtering to {len(sky)} visible stars.")
+
+    print("\n--- STEP 2: CLUSTERING ---")
+    patterns = create_constellations(sky, max_distance=0.18, min_spacing=0.15)
+    print(f"Discovered {len(patterns)} constellations.")
+
+    print("\n--- STEP 3: MYTHOLOGY ---")
+    oracle = StoryTeller()
+    for p in patterns:
+        name, story = oracle.generate_myth(p)
+        p.mythology = f"{name}: {story}"
+        if p.cid <= 3:
+            print(f"Constellation #{p.cid}: {name}\n   Story: {story}")
+
+    print("\n--- STEP 4: LIVE ANIMATION ---")
+    my_anim = animate_sky(sky, patterns, interval=50)
+    plt.tight_layout()
+    plt.show()
+
+    print("\n--- STEP 5: SAVING ---")
+    save_universe("my_constellation_system.json", sky, patterns)
+    print("Done!")
