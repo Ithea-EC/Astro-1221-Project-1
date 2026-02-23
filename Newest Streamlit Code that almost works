@@ -1,16 +1,17 @@
+## This is the custom constellation project by Ithea and Lauren! This is the code file used in the Streamlit app.
+## We were unsure how to do markdown cells like in Juypter Lab, but for our descriptions we will be using the hashtags to talk about our code. 
+
 import matplotlib
 import sys
-# Use non-GUI backend when imported by Streamlit (no display); TkAgg only when running animation locally
 if __name__ == "__main__":
-<<<<<<< HEAD
     matplotlib.use('TkAgg') # Force window popup for animate_sky()
 else:
-    matplotlib.use('Agg') # Headless for Streamlit — avoids freeze from Tk trying to open a display
-=======
-    matplotlib.use('TkAgg')  # Force window popup for animate_sky()
-else:
-    matplotlib.use('Agg')   # Headless for Streamlit — avoids freeze from Tk trying to open a display
->>>>>>> origin/main
+    matplotlib.use('Agg') #For Streamlit — avoids 'freeze when trying to open a display
+
+## The first few lines are just for the animation to work properly. So ideally, we should be able to run this code
+## by itself without the Streamlit part to test the animation. Streamlit does not like it when you try to run the animation.
+## So in short, if the code is ran locally, it should use TkAgg to open a window to display the animation.
+## And if imported by Streamlit, it should use Agg to avoid the freeze. This is just a check for us to make sure streamlit is working fine.
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -20,16 +21,13 @@ import os
 import random
 import math
 
-# --- 1. THE CLASSES ---
+
+# --- 1. THE CLASSES --- #
 
 class Star:
     def __init__(self, star_id, azimuth, altitude, magnitude):
         self.id = star_id
-<<<<<<< HEAD
         self.azimuth = azimuth # Angle in radians (0 to 2pi)
-=======
-        self.azimuth = azimuth   # Angle in radians (0 to 2pi)
->>>>>>> origin/main
         self.altitude = altitude # Distance from center (0 to 1)
         self.magnitude = magnitude
         self.update_xy()
@@ -55,23 +53,26 @@ class Star:
             "altitude": self.altitude, "magnitude": self.magnitude
         }
 
+## This builds the Class for stars. Each star stores its position in the sky (azimuth and altitude) - as polar coordinates - and its magnitude.
+## This will help us in creating a sky like map that we typically see in a lot of astronomy rather than just a flat map.
+## The update_xy converts the polar coordinates to Cartesian coordinates (x, y) for easier calculation of distances between stars.
+## It is easier to find these distances using trig in Cartesian rather than polar, I don't like working with polar unless necessary.
+## The rotate function is used to rotate the star around the center of the sky. This was used in the animation to make it look like the sky is rotating.
+## So even though we scraped the animation idea for Streamlit, it lives in the code with no issue.
+## And finally, the to_dict function is used to convert the star object to a dictionary for easy saving and loading of the universe.
+
 class Constellation:
     def __init__(self, cid, stars=None, mythology="Unknown"):
         self.cid = cid
         self.stars = stars if stars else [] 
         self.edges = [] 
         self.mythology = mythology
-        # --- NEW: 50% chance the constellation forms a connected closed loop ---
         self.is_closed = random.choice([True, False])
     
     def add_star(self, star):
         if star not in self.stars:
             self.stars.append(star)
-<<<<<<< HEAD
     
-=======
-            
->>>>>>> origin/main
     def get_center(self):
         """Calculates center point using vector math to handle wrapping."""
         if not self.stars: return 0, 0
@@ -94,7 +95,15 @@ class Constellation:
             "mythology": self.mythology
         }
 
-# --- 2. THE GENERATORS ---
+## This builds the Class for constellations. It represents a group of stars that are connected to each other.
+## It stores the stars in the constellations, the list of edges (or rather the pairs of stars that form lines), and the mythology string.
+## The random choice for is_closed is used to make some constellations closed and some open. We were having trouble making the constellations not look like rectangles.
+## So for a closed constellation, it would be similar to a polygon. And then a open one would be like a line or a combo like the Dippers we know. 
+## The get center function figures out where the visual center of the constellation is. This is used to place the name of the constellation in the center of the constellation.
+## And similarly, the to_dict function is used to convert the constellation object to a dictionary for easy saving and loading of the universe.
+
+
+# --- 2. THE GENERATORS --- #
 
 def generate_stars(num_stars=150, seed=None):
     if seed: np.random.seed(seed)
@@ -109,9 +118,16 @@ def generate_stars(num_stars=150, seed=None):
         stars.append(Star(i, azimuths[i], altitudes[i], magnitudes[i]))
     return stars
 
+## This function generates the stars. It creates a list of stars with random azimuths, altitudes, and magnitudes.
+## The azimuths are spread out evenly through the sky in a full circle. The altitudes are spread out from the center of the sky to the edge.
+## The difference between the altitudes and the  azimuths is the square function that is necessary to stop the stars from being too close to the center of the sky.
+## The magnitudes use an exponential distribution to give more weight to the brighter stars on a range between 1 and 6. 
+
 def get_bright_field(star_list, threshold=5.5):
     """Requirement: Filters stars using a list comprehension."""
     return [s for s in star_list if s.magnitude <= threshold]
+
+## This function filters the stars to only include the brightest ones. This is used to make the background of the sky not too bright.
 
 def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
     """Finds branching networks of stars, occasionally closing them into loops."""
@@ -126,19 +142,14 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
                 if target_star.distance_to(existing_star) < min_spacing:
                     return True
         return False
-<<<<<<< HEAD
+
+        ## This function checks if a star is too close to another star. If it is, it returns True. We had issues of constellations crossing into each other's spaces and being ugly and bad...
+        ## This just enforces a minimum spacing between stars to prevent this.
     
     for anchor in sorted_stars:
         if anchor.id in used_ids or anchor.magnitude > 4.0: continue
         if is_trespassing(anchor): continue
         
-=======
-        
-    for anchor in sorted_stars:
-        if anchor.id in used_ids or anchor.magnitude > 4.0: continue
-        if is_trespassing(anchor): continue
-            
->>>>>>> origin/main
         new_const = Constellation(c_count)
         new_const.add_star(anchor)
         temp_used = {anchor.id}
@@ -152,18 +163,13 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
                 if candidate.id in used_ids or candidate.id in temp_used: continue
                 if is_trespassing(candidate): continue
                 if candidate.magnitude > 4.5: continue
-<<<<<<< HEAD
                 
-=======
-                    
->>>>>>> origin/main
                 for current_star in new_const.stars:
                     d = current_star.distance_to(candidate)
                     if d < closest_dist:
                         closest_dist = d
                         best_candidate = candidate
                         best_parent = current_star
-<<<<<<< HEAD
                 
                 if best_candidate:
                     new_const.add_star(best_candidate)
@@ -172,45 +178,30 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
                 else:
                     break 
         
-=======
-            
-            if best_candidate:
-                new_const.add_star(best_candidate)
-                new_const.edges.append((best_parent, best_candidate)) 
-                temp_used.add(best_candidate.id)
-            else:
-                break 
-                
->>>>>>> origin/main
-        # --- THE FIX: If it's a closed shape, connect the last star to the first! ---
         if new_const.is_closed and len(new_const.stars) >= 3:
             new_const.edges.append((new_const.stars[-1], new_const.stars[0]))
         
         if len(new_const.stars) >= 4:
             constellations.append(new_const)
             used_ids.update(temp_used) 
-<<<<<<< HEAD
         c_count += 1
     
-=======
-            c_count += 1
-            
->>>>>>> origin/main
     return constellations
-# --- 3. THE STORYTELLER (OSU LITELLM POWERED) ---
 
-# --- 3. THE STORYTELLER (OSU LITELLM POWERED) ---
+## And finally, we create the constellations. We start with the brightest stars and work our way down to the faintest ones.
+## Using the brighest stars as anchors for these constellations make it a little easier to see the constellations come together.
+## This series of functions will create any number of constellations that are connected to each other. However, only constellations with at least 4 stars are kept.
+## This is to prevent the constellations from being too small and not being able to be seen.
+## Finally, if the constellation was randonly assigned an is_closed = True statement and has at least 3 stars, it adds more more connecting edge to close to the loop.
+
+
+# --- 3. THE STORYTELLER  --- #
+
 from openai import OpenAI
 import random
-
 class AdvancedStoryTeller:
     def __init__(self, api_key, proxy_url):
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=proxy_url
-        )
         self.used_names = set()
-        
         # A list of diverse flavors to guarantee every constellation feels entirely different
         self.themes = [
             "ancient Norse mythology", 
@@ -224,37 +215,38 @@ class AdvancedStoryTeller:
             "dark fantasy cosmic horror"
         ]
 
+## This is the class for the storyteller, it's relatively straightforward.It generates a story for a given constellation.
+## It uses the OpenAI API to generate the story and we gave it a list of themes to choose from to give the story something not fully expected. Hopefully not too similar. 
+## But it is very cheesy at times. These themes are randomly assigned as well. 
+
     def generate_myth(self, constellation):
         num_stars = len(constellation.stars)
         chosen_theme = random.choice(self.themes)
         
-        # Stricter prompt demanding exactly 2-4 sentences for speed
         prompt = (
             f"You are a cosmic historian. I found a constellation of {num_stars} stars. "
             f"1. Give it a creative, unique proper name inspired by {chosen_theme}. "
-            f"2. Write a myth about it. STRICT LIMIT: The story MUST be exactly 2 to 4 sentences maximum. "
+            f"2. Write a myth about it. STRICT LIMIT: The story MUST be exactly 3 to 5 sentences maximum. "
             f"Format EXACTLY like this:\n"
             f"Name: [Insert Name]\n"
             f"Story: [Insert Story]"
         )
         
+## I think the prompt is pretty funny. We tell it kind of a persona to emulate and then how we want the stories to look like. The sentence maximum was a remnant of the animation code..
+## We used to run this code in the terminal, and since later on we tell it to print that every step is done and also print out the stories before the graphic, it would take genuienly 
+## ages to get to the graphic, so a small paragraph limit was put in place to speed up the process.
+
         try:
             response = self.client.chat.completions.create(
                 model="GPT-4.1-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.9,
-<<<<<<< HEAD
                 max_tokens=150, # Keeps responses short
                 timeout=30.0, # Avoid freezing if API is slow or unreachable
-=======
-                max_tokens=150,  # Keeps responses short
-                timeout=30.0,   # Avoid freezing if API is slow or unreachable
->>>>>>> origin/main
             )
             
             text = response.choices[0].message.content
             
-            # Safely parse the response
             name_line = [line for line in text.split('\n') if line.startswith('Name:')]
             
             try:
@@ -273,7 +265,12 @@ class AdvancedStoryTeller:
         except Exception as e:
             return f"Constellation {constellation.cid}", f"The oracle is silent. (Error: {e})"
 
-# --- 4. ANIMATION FUNCTION ---
+    ## This was mainly an error check for us to make sure the storyteller is working fine.
+    ## We never saw the 'oracle's scrolls' line, but the 'oracle is silent' line was seen in the early stages of trying to get this code into streamlit.
+    ## Ideally, this ensures that the program doesn't crash if the API is slow or unreachable, and then we know exactly where we we wrong depending on what was wrong with the 'oracle'.
+
+
+# --- 4. ANIMATION FUNCTION --- #
 
 def animate_sky(stars, constellations, interval=50):
     fig = plt.figure(figsize=(10, 10))
@@ -317,19 +314,19 @@ def animate_sky(stars, constellations, interval=50):
             c_name = c.mythology.split(":")[0] if ":" in c.mythology else f"Constellation {c.cid}"
             center_az, center_alt = c.get_center()
             lbl = ax.text(center_az, center_alt, c_name, color='#AAFFFF', 
-<<<<<<< HEAD
                 fontsize=9, ha='center', va='center', fontweight='bold',
                 bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
-=======
-                          fontsize=9, ha='center', va='center', fontweight='bold',
-                          bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
->>>>>>> origin/main
             const_labels.append((lbl, c))
 
     time_display = ax.set_title("Simulating Time...", color='white', fontsize=16, fontweight='bold', pad=30)
 
     start_time_hours = 21.0
     time_step = 0.05
+
+    ## The animate sky function sets up a live animated polar plot that we ended up not fully using but it was easier to make it static for Streamlit later on rather than dealing with it now
+    ## The time display ended up not working and wasn't used in the end. But if we had continued with the animation, I think it would have been a very neat add on.
+    ## The polar axes are  made so that N at top and goes in the clockwise direction to match a real sky map.
+    ## Intially, stars were drawn in two layers: a semi transparent glow scatter adn a smaller bright core that gave a kind of blooming effect to the stars.  
 
     def update(frame):
         for s in stars:
@@ -340,11 +337,7 @@ def animate_sky(stars, constellations, interval=50):
         scatter_core.set_offsets(np.c_[new_az, new_alt])
         scatter_glow.set_offsets(np.c_[new_az, new_alt])
 
-<<<<<<< HEAD
         # Update Constellations
-=======
-# Update Constellations
->>>>>>> origin/main
         for i, const in enumerate(constellations):
             c_az = []
             c_alt = []
@@ -356,7 +349,6 @@ def animate_sky(stars, constellations, interval=50):
             
             const_lines[i].set_data(c_az, c_alt)
             
-            # --- THE FIX: Only show the nebula fill if the shape is connected! ---
             if const.is_closed:
                 fill_az = [s.azimuth for s in const.stars]
                 fill_alt = [s.altitude for s in const.stars]
@@ -385,6 +377,9 @@ def animate_sky(stars, constellations, interval=50):
     ani = FuncAnimation(fig, update, frames=200, interval=interval, blit=False)
     return ani
 
+## The update function is called every interval to update the plot. It rotates the stars and updates the constellations.
+## Each frame it rotates every star by a time step of 0.05 hours which is about 3 minutes of simulated time. 
+## It redraws every scatter point, all the constellations lines, and shows or hides the cyan fill based on the is_closed command. The cyan fill is a little wonky in Streamlit but I still like it.
 
 def get_static_sky_figure(stars, constellations, time_hours=21.0, name_overrides=None):
     """
@@ -441,11 +436,7 @@ def get_static_sky_figure(stars, constellations, time_hours=21.0, name_overrides
             overrides = name_overrides or {}
             c_name = overrides.get(c.cid) or (c.mythology.split(":")[0] if ":" in c.mythology else f"Constellation {c.cid}")
             ax.text(center_az, center_alt, c_name, color='#AAFFFF', fontsize=9, ha='center', va='center',
-<<<<<<< HEAD
                 fontweight='bold', bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
-=======
-                    fontweight='bold', bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
->>>>>>> origin/main
 
     current = time_hours % 24
     hour_24 = int(current)
@@ -457,8 +448,13 @@ def get_static_sky_figure(stars, constellations, time_hours=21.0, name_overrides
     plt.tight_layout()
     return fig
 
+## The get_static_sky_figure function is used to create a static figure, that static image that is shown is used in streamlit because we were not able to figure out how to animate in Streamlit.
+## It is basically the same as the animate_sky function but without the animation.
+## It doesn't change any of the star objects so we can keep all of the code that we had before.
+## It uses a name_overrides dictionary so that Streamlit can use the LLM generated names without permanently modyfinging the constellation objects.
 
-# --- 5. FILE I/O WITH ERROR HANDLING ---
+
+# --- 5. FILE I/O WITH ERROR HANDLING --- #
 
 def save_universe(filename, stars, constellations):
     """Saves universe with error handling for file permissions or empty data."""
@@ -477,9 +473,15 @@ def save_universe(filename, stars, constellations):
     except (IOError, PermissionError) as e:
         print(f"CRITICAL ERROR: Could not save file. Technical details: {e}")
 
-# # --- MAIN EXECUTION ---
+## save universe turns the star fields and constellations into a JSON file using each object's to_dict method. 
+## This prevents two main things, saving an unworking/empty universe and also allows us to load the universe back in later if we want to.
+## Errors like permission errors or file not found errors are caught and printed out to the console so we know where this is going wrong.
+
+
+# # --- MAIN EXECUTION --- # #
 
 if __name__ == "__main__":
+
     print("--- STEP 1: GENESIS ---")
     sky = generate_stars(num_stars=600, seed=None) 
     print(f"Created {len(sky)} stars.")
@@ -488,8 +490,9 @@ if __name__ == "__main__":
     patterns = create_constellations(sky, max_distance=0.35, min_spacing=0.15)
     print(f"Discovered {len(patterns)} constellations.")
 
-    print("\n--- STEP 3: MYTHOLOGY (CONSULTING THE LITELLM ORACLE) ---")
+## these first two steps are printed to make sure that the code is working and that the stars and constellations are being created.
 
+    print("\n--- STEP 3: MYTHOLOGY (CONSULTING THE ORACLE) ---")
     # Use environment variable (never commit keys to the repo)
     my_api_key = os.getenv("ASTRO1221_API_KEY") or os.getenv("OSU_LITELLM_API_KEY")
     my_proxy_url = os.getenv("ASTRO1221_PROXY_URL") or os.getenv("OSU_LITELLM_PROXY_URL") or "https://litellmproxy.osu-ai.org/v1"
@@ -507,21 +510,19 @@ if __name__ == "__main__":
     
     for i, p in enumerate(patterns):
         if len(p.stars) >= 5 and oracle:
-<<<<<<< HEAD
             print(f"  Dreaming up Major Constellation #{p.cid}...")
             name, story = oracle.generate_myth(p)
             p.mythology = f"{name}: {story}"
             print(f"   -> {name}\n   -> {story}\n")
-=======
-            print(f"   Dreaming up Major Constellation #{p.cid}...")
-            name, story = oracle.generate_myth(p)
-            p.mythology = f"{name}: {story}"
-            print(f"      -> {name}\n      -> {story}\n")
->>>>>>> origin/main
         elif len(p.stars) >= 5:
             p.mythology = f"Major Sector {p.cid} Anomaly: A faint, uncharted cluster."
         else:
             p.mythology = f"Minor Sector {p.cid} Anomaly: A faint, uncharted cluster."
+
+## The print for step 3 is a little more descriptive and tells us which constellation is being worked on and what the story is.
+## If ran in the terminal, it would print out the story for each constellation. Which was one of the things that I talked about eariler. The time that it took to run this code with this steps was very long,
+## We made sure to imbed a few error statements to make sure that the code is working fine and that the API is working fine. Depending on the error, we would know exactly where we went wrong.
+
 
     print("\n--- STEP 4: LIVE ANIMATION ---")
     print("Opening Window... Close the window to save and exit.")
@@ -534,3 +535,7 @@ if __name__ == "__main__":
     print("\n--- STEP 5: SAVING ---")
     save_universe("my_constellation_system.json", sky, patterns)
     print("Done!")
+
+## And the last two steps are just creating the animation and saving the universe. It will give you a 'Done!' if all of these steps have been satisfied.
+## That is all for the code that goes into the streamlit app! We have another code file that runs the app that has more description of what's going on over there.
+## Thank you! :)
