@@ -1,22 +1,10 @@
 import matplotlib
-import sys
-# Use non-GUI backend when imported by Streamlit (no display); TkAgg only when running animation locally
-if __name__ == "__main__":
-<<<<<<< HEAD
-    matplotlib.use('TkAgg') # Force window popup for animate_sky()
-else:
-    matplotlib.use('Agg') # Headless for Streamlit — avoids freeze from Tk trying to open a display
-=======
-    matplotlib.use('TkAgg')  # Force window popup for animate_sky()
-else:
-    matplotlib.use('Agg')   # Headless for Streamlit — avoids freeze from Tk trying to open a display
->>>>>>> origin/main
+matplotlib.use('TkAgg')  # Force window popup
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import json
-import os
 import random
 import math
 
@@ -25,11 +13,7 @@ import math
 class Star:
     def __init__(self, star_id, azimuth, altitude, magnitude):
         self.id = star_id
-<<<<<<< HEAD
-        self.azimuth = azimuth # Angle in radians (0 to 2pi)
-=======
         self.azimuth = azimuth   # Angle in radians (0 to 2pi)
->>>>>>> origin/main
         self.altitude = altitude # Distance from center (0 to 1)
         self.magnitude = magnitude
         self.update_xy()
@@ -67,11 +51,7 @@ class Constellation:
     def add_star(self, star):
         if star not in self.stars:
             self.stars.append(star)
-<<<<<<< HEAD
-    
-=======
             
->>>>>>> origin/main
     def get_center(self):
         """Calculates center point using vector math to handle wrapping."""
         if not self.stars: return 0, 0
@@ -126,19 +106,11 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
                 if target_star.distance_to(existing_star) < min_spacing:
                     return True
         return False
-<<<<<<< HEAD
-    
-    for anchor in sorted_stars:
-        if anchor.id in used_ids or anchor.magnitude > 4.0: continue
-        if is_trespassing(anchor): continue
-        
-=======
         
     for anchor in sorted_stars:
         if anchor.id in used_ids or anchor.magnitude > 4.0: continue
         if is_trespassing(anchor): continue
             
->>>>>>> origin/main
         new_const = Constellation(c_count)
         new_const.add_star(anchor)
         temp_used = {anchor.id}
@@ -152,27 +124,13 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
                 if candidate.id in used_ids or candidate.id in temp_used: continue
                 if is_trespassing(candidate): continue
                 if candidate.magnitude > 4.5: continue
-<<<<<<< HEAD
-                
-=======
                     
->>>>>>> origin/main
                 for current_star in new_const.stars:
                     d = current_star.distance_to(candidate)
                     if d < closest_dist:
                         closest_dist = d
                         best_candidate = candidate
                         best_parent = current_star
-<<<<<<< HEAD
-                
-                if best_candidate:
-                    new_const.add_star(best_candidate)
-                    new_const.edges.append((best_parent, best_candidate)) 
-                    temp_used.add(best_candidate.id)
-                else:
-                    break 
-        
-=======
             
             if best_candidate:
                 new_const.add_star(best_candidate)
@@ -181,7 +139,6 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
             else:
                 break 
                 
->>>>>>> origin/main
         # --- THE FIX: If it's a closed shape, connect the last star to the first! ---
         if new_const.is_closed and len(new_const.stars) >= 3:
             new_const.edges.append((new_const.stars[-1], new_const.stars[0]))
@@ -189,13 +146,8 @@ def create_constellations(star_list, max_distance=0.35, min_spacing=0.15):
         if len(new_const.stars) >= 4:
             constellations.append(new_const)
             used_ids.update(temp_used) 
-<<<<<<< HEAD
-        c_count += 1
-    
-=======
             c_count += 1
             
->>>>>>> origin/main
     return constellations
 # --- 3. THE STORYTELLER (OSU LITELLM POWERED) ---
 
@@ -240,16 +192,10 @@ class AdvancedStoryTeller:
         
         try:
             response = self.client.chat.completions.create(
-                model="GPT-4.1-mini",
+                model="GPT-4.1-mini", 
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.9,
-<<<<<<< HEAD
-                max_tokens=150, # Keeps responses short
-                timeout=30.0, # Avoid freezing if API is slow or unreachable
-=======
-                max_tokens=150,  # Keeps responses short
-                timeout=30.0,   # Avoid freezing if API is slow or unreachable
->>>>>>> origin/main
+                max_tokens=150 # Forces the AI to stop generating early!
             )
             
             text = response.choices[0].message.content
@@ -317,13 +263,8 @@ def animate_sky(stars, constellations, interval=50):
             c_name = c.mythology.split(":")[0] if ":" in c.mythology else f"Constellation {c.cid}"
             center_az, center_alt = c.get_center()
             lbl = ax.text(center_az, center_alt, c_name, color='#AAFFFF', 
-<<<<<<< HEAD
-                fontsize=9, ha='center', va='center', fontweight='bold',
-                bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
-=======
                           fontsize=9, ha='center', va='center', fontweight='bold',
                           bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
->>>>>>> origin/main
             const_labels.append((lbl, c))
 
     time_display = ax.set_title("Simulating Time...", color='white', fontsize=16, fontweight='bold', pad=30)
@@ -340,11 +281,7 @@ def animate_sky(stars, constellations, interval=50):
         scatter_core.set_offsets(np.c_[new_az, new_alt])
         scatter_glow.set_offsets(np.c_[new_az, new_alt])
 
-<<<<<<< HEAD
-        # Update Constellations
-=======
 # Update Constellations
->>>>>>> origin/main
         for i, const in enumerate(constellations):
             c_az = []
             c_alt = []
@@ -385,79 +322,6 @@ def animate_sky(stars, constellations, interval=50):
     ani = FuncAnimation(fig, update, frames=200, interval=interval, blit=False)
     return ani
 
-
-def get_static_sky_figure(stars, constellations, time_hours=21.0, name_overrides=None):
-    """
-    Returns a single-frame matplotlib figure matching animate_sky's look,
-    at the given simulated time (hours 0-24). For use in Streamlit (no animation).
-    name_overrides: optional dict mapping constellation cid -> display name (e.g. from LLM).
-    """
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection='polar')
-
-    ax.set_facecolor('#000010')
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)
-
-    ax.grid(True, color='cyan', alpha=0.25, linestyle=':')
-    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.set_yticklabels([])
-    ax.set_xticks(np.linspace(0, 2*np.pi, 8, endpoint=False))
-    ax.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'], color='#8888AA')
-
-    horizon_angles = np.linspace(0, 2*np.pi, 100)
-    ax.plot(horizon_angles, np.ones(100), color='cyan', linestyle='--', alpha=0.3, lw=1)
-
-    # Rotate stars for this time (same as animate_sky: 15 deg/hour from 21:00)
-    rot_rad = (time_hours - 21.0) * (np.pi / 12)
-    display_az = np.array([(s.azimuth + rot_rad) % (2*np.pi) for s in stars])
-    display_alt = np.array([s.altitude for s in stars])
-
-    sizes = [0.6 * (7 - s.magnitude)**2.5 for s in stars]
-    glow_sizes = [s * 4 for s in sizes]
-    colors = plt.cm.plasma_r(np.array([s.magnitude for s in stars]) / 6)
-
-    ax.scatter(display_az, display_alt, s=glow_sizes, c=colors, alpha=0.2, zorder=9)
-    ax.scatter(display_az, display_alt, s=sizes, c='white', alpha=0.9, zorder=10)
-
-    for c in constellations:
-        c_az = []
-        c_alt = []
-        for star1, star2 in c.edges:
-            az1 = (star1.azimuth + rot_rad) % (2*np.pi)
-            az2 = (star2.azimuth + rot_rad) % (2*np.pi)
-            c_az.extend([az1, az2, np.nan])
-            c_alt.extend([star1.altitude, star2.altitude, np.nan])
-        ax.plot(c_az, c_alt, color='cyan', lw=2.0, alpha=0.9)
-        if getattr(c, 'is_closed', False) and len(c.stars) >= 3:
-            fill_az = [(s.azimuth + rot_rad) % (2*np.pi) for s in c.stars]
-            fill_alt = [s.altitude for s in c.stars]
-            ax.fill(fill_az, fill_alt, color='cyan', alpha=0.15)
-        if len(c.stars) >= 5:
-            mean_x = np.mean([s.altitude * np.cos((s.azimuth + rot_rad) % (2*np.pi)) for s in c.stars])
-            mean_y = np.mean([s.altitude * np.sin((s.azimuth + rot_rad) % (2*np.pi)) for s in c.stars])
-            center_az = np.arctan2(mean_y, mean_x)
-            center_alt = np.sqrt(mean_x**2 + mean_y**2)
-            overrides = name_overrides or {}
-            c_name = overrides.get(c.cid) or (c.mythology.split(":")[0] if ":" in c.mythology else f"Constellation {c.cid}")
-            ax.text(center_az, center_alt, c_name, color='#AAFFFF', fontsize=9, ha='center', va='center',
-<<<<<<< HEAD
-                fontweight='bold', bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
-=======
-                    fontweight='bold', bbox=dict(facecolor='#000010', alpha=0.7, edgecolor='none', pad=2), zorder=20)
->>>>>>> origin/main
-
-    current = time_hours % 24
-    hour_24 = int(current)
-    minute = int(round((current - hour_24) * 60))
-    am_pm = "AM" if hour_24 < 12 else "PM"
-    hour_12 = hour_24 % 12 or 12
-    ax.set_title(f"Simulated Time: {hour_12:02d}:{minute:02d} {am_pm}", color='white', fontsize=16, fontweight='bold', pad=30)
-
-    plt.tight_layout()
-    return fig
-
-
 # --- 5. FILE I/O WITH ERROR HANDLING ---
 
 def save_universe(filename, stars, constellations):
@@ -489,38 +353,24 @@ if __name__ == "__main__":
     print(f"Discovered {len(patterns)} constellations.")
 
     print("\n--- STEP 3: MYTHOLOGY (CONSULTING THE LITELLM ORACLE) ---")
-
-    # Use environment variable (never commit keys to the repo)
-    my_api_key = os.getenv("ASTRO1221_API_KEY") or os.getenv("OSU_LITELLM_API_KEY")
-    my_proxy_url = os.getenv("ASTRO1221_PROXY_URL") or os.getenv("OSU_LITELLM_PROXY_URL") or "https://litellmproxy.osu-ai.org/v1"
-
-    if not my_api_key:
-        print("ERROR: No API key found. Set ASTRO1221_API_KEY or OSU_LITELLM_API_KEY in your environment.")
-        print("  Windows (PowerShell): $env:ASTRO1221_API_KEY = \"your-key-here\"")
-        print("  Or add to .streamlit/secrets.toml: osu_litellm_api_key = \"your-key-here\"")
-        print("Skipping LLM mythology — using placeholder names only.")
-        oracle = None
-    else:
-        oracle = AdvancedStoryTeller(api_key=my_api_key, proxy_url=my_proxy_url)
+    
+    # ---> PUT YOUR ACTUAL OSU KEY BETWEEN THE QUOTES BELOW: <---
+    my_api_key = "sk-LT1uy-h-YjbwZ-TlBLfaow" 
+    my_proxy_url = "https://litellmproxy.osu-ai.org/v1" 
+    
+    oracle = AdvancedStoryTeller(api_key=my_api_key, proxy_url=my_proxy_url)
     
     print(f"Generating lore for the MAJOR constellations only. This will be much faster...")
     
     for i, p in enumerate(patterns):
-        if len(p.stars) >= 5 and oracle:
-<<<<<<< HEAD
-            print(f"  Dreaming up Major Constellation #{p.cid}...")
-            name, story = oracle.generate_myth(p)
-            p.mythology = f"{name}: {story}"
-            print(f"   -> {name}\n   -> {story}\n")
-=======
+        # --- THE SPEED HACK: Only ask the AI to dream up lore for the big shapes ---
+        if len(p.stars) >= 5:
             print(f"   Dreaming up Major Constellation #{p.cid}...")
             name, story = oracle.generate_myth(p)
             p.mythology = f"{name}: {story}"
             print(f"      -> {name}\n      -> {story}\n")
->>>>>>> origin/main
-        elif len(p.stars) >= 5:
-            p.mythology = f"Major Sector {p.cid} Anomaly: A faint, uncharted cluster."
         else:
+            # Instantly assign a generic name to the tiny clusters without using the internet
             p.mythology = f"Minor Sector {p.cid} Anomaly: A faint, uncharted cluster."
 
     print("\n--- STEP 4: LIVE ANIMATION ---")

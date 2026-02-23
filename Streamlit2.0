@@ -1,0 +1,340 @@
+"""
+Streamlit app: time slider (7pm–7am) drives constellation positions;
+hover shows constellation name; click calls Storyteller LLM for mythology.
+Run with: streamlit run streamlit_sky_app.py
+"""
+
+import importlib.util
+import math
+import sys
+from pathlib import Path
+from importlib.machinery import SourceFileLoader
+
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+
+# Load CodeForStreamlit1 (no .py extension — use SourceFileLoader so spec has a loader)
+SCRIPT_DIR = Path(__file__).resolve().parent
+CODE_PATH = SCRIPT_DIR / "CodeForStreamlit1"
+loader = SourceFileLoader("code_for_streamlit", str(CODE_PATH))
+spec = importlib.util.spec_from_loader("code_for_streamlit", loader)
+code_module = importlib.util.module_from_spec(spec)
+sys.modules["code_for_streamlit"] = code_module
+spec.loader.exec_module(code_module)
+
+generate_stars = code_module.generate_stars
+create_constellations = code_module.create_constellations
+Star = code_module.Star
+Constellation = code_module.Constellation
+AdvancedStoryTeller = code_module.AdvancedStoryTeller
+
+
+def _rotated_positions(stars, rotation_hours):
+    """Build star_id -> (rotated_az, altitude) without mutating stars."""
+    rotation_rad = (rotation_hours * (math.pi / 12)) % (2 * math.pi)
+    return {
+        s.id: ((s.azimuth + rotation_rad) % (2 * math.pi), s.altitude)
+        for s in stars
+    }
+
+
+def _center_from_positions(constellation, pos):
+    """Center (az, alt) of a constellation using rotated positions dict."""
+    if not constellation.stars:
+        return 0.0, 0.0
+    xs = [pos[s.id][1] * math.cos(pos[s.id][0]) for s in constellation.stars]
+    ys = [pos[s.id][1] * math.sin(pos[s.id][0]) for s in constellation.stars]
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    center_alt = math.sqrt(mean_x**2 + mean_y**2)
+    center_az = math.atan2(mean_y, mean_x)
+    return center_az, center_alt
+
+
+def _constellation_display_name(constellation, mythology_cache):
+    """Name for hover: from cache if clicked before, else 'Constellation N'."""
+    if constellation.cid in mythology_cache:
+        name = mythology_cache[constellation.cid].get("name")
+        if name:
+            return name
+    return f"Constellation {constellation.cid}"
+
+
+def build_sky_plotly(stars, constellations, pos, mythology_cache):
+    """
+    Build one Plotly polar figure: stars scatter, constellation lines (with hover),
+    and invisible center points for click (customdata=cid).
+    """
+    # Theta: radians -> degrees for Plotly; 0 at top (N), clockwise
+    theta_deg = np.degrees([pos[s.id][0] for s in stars])
+    r = [pos[s.id][1] for s in stars]
+    sizes = [max(4, 0.6 * (7 - s.magnitude) ** 2.5) for s in stars]
+
+    traces = []
+
+    # Stars scatter (non-selectable for clarity; click goes to constellation centers)
+    traces.append(
+        go.Scatterpolar(
+            r=r,
+            theta=theta_deg,
+            mode="markers",
+            marker=dict(
+                size=sizes,
+                color=[s.magnitude for s in stars],
+                colorscale="Plasma_r",
+                cmin=1,
+                cmax=6,
+                line=dict(color="white", width=0.5),
+                opacity=0.9,
+            ),
+            name="Stars",
+            hoverinfo="skip",
+            legendgroup="stars",
+        )
+    )
+
+    # Single trace for all constellation lines (so they always render; Plotly can hide multi-trace lines)
+    all_seg_theta = []
+    all_seg_r = []
+    for c in constellations:
+        for star1, star2 in c.edges:
+            az1, alt1 = pos[star1.id]
+            az2, alt2 = pos[star2.id]
+            all_seg_theta.extend([np.degrees(az1), np.degrees(az2), None])
+            all_seg_r.extend([alt1, alt2, None])
+    if all_seg_theta:
+        traces.append(
+            go.Scatterpolar(
+                r=all_seg_r,
+                theta=all_seg_theta,
+                mode="lines",
+                line=dict(color="rgb(0, 255, 255)", width=2.5),
+                name="Constellations",
+                hoverinfo="skip",
+                legendgroup="const_lines",
+            )
+        )
+    # Closed fills (one trace per constellation so fill="toself" works)
+    for c in constellations:
+        if getattr(c, "is_closed", False) and len(c.stars) >= 3:
+            display_name = _constellation_display_name(c, mythology_cache)
+            fill_theta = [np.degrees(pos[s.id][0]) for s in c.stars]
+            fill_r = [pos[s.id][1] for s in c.stars]
+            traces.append(
+                go.Scatterpolar(
+                    r=fill_r,
+                    theta=fill_theta,
+                    mode="lines",
+                    line=dict(color="rgba(0, 255, 255, 0.4)", width=0.5),
+                    fill="toself",
+                    fillcolor="rgba(0, 255, 255, 0.12)",
+                    name=display_name,
+                    hoverinfo="name",
+                    legendgroup=f"const_{c.cid}",
+                )
+            )
+
+    # Invisible center points for click (one per constellation), with customdata = cid
+    center_thetas = []
+    center_rs = []
+    center_cids = []
+    center_names = []
+    for c in constellations:
+        c_az, c_alt = _center_from_positions(c, pos)
+        center_thetas.append(np.degrees(c_az))
+        center_rs.append(c_alt)
+        center_cids.append(c.cid)
+        center_names.append(_constellation_display_name(c, mythology_cache))
+
+    # Clickable constellation centers: faint ring so they’re visible and reliably clickable
+    traces.append(
+        go.Scatterpolar(
+            r=center_rs,
+            theta=center_thetas,
+            mode="markers",
+            marker=dict(
+                size=24,
+                color="rgba(0,0,0,0)",
+                symbol="circle",
+                line=dict(color="rgba(0, 255, 255, 0.35)", width=1),
+            ),
+            customdata=[[cid] for cid in center_cids],
+            name="Constellations (click)",
+            hovertext=center_names,
+            hoverinfo="text",
+            legendgroup="centers",
+            showlegend=False,
+        )
+    )
+
+    fig = go.Figure(data=traces)
+    fig.update_layout(
+        polar=dict(
+            bgcolor="#000010",
+            radialaxis=dict(
+                range=[0, 1],
+                showticklabels=False,
+                gridcolor="rgba(0, 255, 255, 0.25)",
+                ticklen=0,
+            ),
+            angularaxis=dict(
+                rotation=90,
+                direction="clockwise",
+                gridcolor="rgba(0, 255, 255, 0.25)",
+                tickvals=[0, 45, 90, 135, 180, 225, 270, 315],
+                ticktext=["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+                tickcolor="#8888AA",
+            ),
+        ),
+        paper_bgcolor="#000010",
+        plot_bgcolor="#000010",
+        font=dict(color="#cccccc"),
+        height=600,
+        margin=dict(t=60, b=40, l=40, r=40),
+        showlegend=False,
+    )
+
+    # Horizon ring at r=1
+    horizon_theta = np.linspace(0, 360, 100)
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[1.0] * 100,
+            theta=horizon_theta,
+            mode="lines",
+            line=dict(color="rgba(0, 255, 255, 0.3)", dash="dash", width=1),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    # Reorder so horizon is behind
+    fig.data = [fig.data[-1]] + list(fig.data[:-1])
+
+    return fig
+
+
+@st.cache_data
+def get_universe(seed=None, num_stars=400):
+    """Generate stars and constellations once (Option B: no LLM at startup)."""
+    stars = generate_stars(num_stars=num_stars, seed=seed)
+    constellations = create_constellations(stars, max_distance=0.35, min_spacing=0.15)
+    return stars, constellations
+
+
+def main():
+    st.set_page_config(page_title="Night Sky", page_icon="⭐", layout="centered")
+    st.title("Night Sky: Time & Constellations")
+    st.markdown(
+        "Set the time (7 PM – 7 AM). Hover over a constellation to see its name; **click** to generate its mythology with the Storyteller LLM."
+    )
+
+    # Session state: mythology cache and storyteller
+    if "mythology_cache" not in st.session_state:
+        st.session_state.mythology_cache = {}
+    if "storyteller" not in st.session_state:
+        api_key = st.secrets.get("osu_litellm_api_key", "") or st.secrets.get("api_key", "")
+        proxy_url = st.secrets.get("osu_litellm_proxy_url", "https://litellmproxy.osu-ai.org/v1")
+        if not api_key:
+            api_key = __import__("os").environ.get("OSU_LITELLM_API_KEY", "")
+        st.session_state.storyteller = None
+        st.session_state.storyteller_api_key = api_key
+        st.session_state.storyteller_proxy_url = proxy_url
+
+    seed = st.sidebar.number_input("Random seed", min_value=0, value=42, step=1)
+    num_stars = st.sidebar.slider("Number of stars", 100, 600, 400, 50)
+
+    with st.spinner("Generating star field…"):
+        stars, constellations = get_universe(seed=seed, num_stars=num_stars)
+
+    # Time slider: 0 = 7 PM, 12 = 7 AM (hours since 7 PM)
+    def _time_label(x):
+        h = (19 + x) % 24
+        if h == 0:
+            return "12:00 AM"
+        if h < 12:
+            return f"{h}:00 AM"
+        if h == 12:
+            return "12:00 PM"
+        return f"{h - 12}:00 PM"
+
+    hours_since_7pm = st.slider(
+        "Time (7 PM → 7 AM)",
+        min_value=0,
+        max_value=12,
+        value=2,
+        step=1,
+        format_func=_time_label,
+    )
+    current_hour = (19 + hours_since_7pm) % 24
+    st.caption(f"Simulated time: {_time_label(hours_since_7pm)}")
+
+    rotation_hours = hours_since_7pm
+    pos = _rotated_positions(stars, rotation_hours)
+    mythology_cache = st.session_state.mythology_cache
+
+    fig = build_sky_plotly(stars, constellations, pos, mythology_cache)
+
+    selection = st.plotly_chart(
+        fig,
+        key="sky",
+        on_select="rerun",
+        selection_mode="points",
+        use_container_width=True,
+    )
+
+    # Resolve clicked constellation: only use points that have customdata (invisible center trace).
+    # Ignore point_index — it can refer to stars or line traces and would give wrong constellation.
+    selected_cid = None
+    points = selection.get("points", []) if isinstance(selection, dict) else (getattr(selection, "points", None) or [])
+    for p in points:
+        cd = p.get("customdata", []) if isinstance(p, dict) else getattr(p, "customdata", None)
+        if cd and len(cd) > 0:
+            selected_cid = cd[0]
+            break
+
+    # Handle this click: fetch mythology if needed, store in session state (no "new page" — show in sidebar)
+    if selected_cid is not None:
+        selected_const = next((c for c in constellations if c.cid == selected_cid), None)
+        if selected_const is not None and selected_cid not in mythology_cache:
+            api_key = st.session_state.storyteller_api_key
+            proxy_url = st.session_state.storyteller_proxy_url
+            if api_key:
+                if st.session_state.storyteller is None:
+                    st.session_state.storyteller = AdvancedStoryTeller(api_key=api_key, proxy_url=proxy_url)
+                with st.spinner("Asking the Storyteller…"):
+                    name, story = st.session_state.storyteller.generate_myth(selected_const)
+                st.session_state.mythology_cache[selected_cid] = {"name": name, "story": story}
+
+    # Sidebar: show constellation count and all mythologies (one place, no new page per click)
+    st.sidebar.caption("API key: set in `.streamlit/secrets.toml` or env OSU_LITELLM_API_KEY.")
+    st.sidebar.markdown(f"**{len(constellations)} constellations** · Click a constellation center on the chart to generate mythology.")
+    if mythology_cache:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Mythology**")
+        for cid, entry in mythology_cache.items():
+            with st.sidebar.expander(entry.get("name", f"Constellation {cid}"), expanded=(selected_cid == cid)):
+                st.caption(entry.get("story", ""))
+
+    # Main area: one expander only for the constellation just clicked (if any)
+    if selected_cid is not None and selected_cid in mythology_cache:
+        cached = mythology_cache[selected_cid]
+        with st.expander(f"Selected: {cached.get('name', f'Constellation {selected_cid}')}", expanded=True):
+            st.write(cached.get("story", ""))
+    elif selected_cid is not None:
+        st.info("Set your OSU LiteLLM API key in `.streamlit/secrets.toml` (e.g. `osu_litellm_api_key`) or env `OSU_LITELLM_API_KEY` to generate mythology for this constellation.")
+
+
+if __name__ == "__main__":
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is not None:
+            main()
+        else:
+            raise RuntimeError("Not in Streamlit")
+    except Exception:
+        import subprocess
+        subprocess.run([
+            sys.executable, "-m", "streamlit", "run",
+            str(Path(__file__).resolve()),
+            *sys.argv[1:],
+        ])

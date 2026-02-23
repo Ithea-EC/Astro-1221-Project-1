@@ -1,0 +1,676 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import json 
+from pathlib import Path
+# ---------------------------------------------------------------------------
+# Custom Exceptions
+# ---------------------------------------------------------------------------
+
+class InvalidStarError(Exception):
+    """Raised when a star has impossible or invalid properties."""
+    pass
+
+
+class StarFieldError(Exception):
+    """Raised when the generated star field fails validation."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Star Class
+# ---------------------------------------------------------------------------
+
+class Star:
+    """
+    Represents a single star in the generated sky.
+
+    Attributes
+    ----------
+    star_id : str
+        Unique identifier (e.g. "star_001").
+    x : float
+        Horizontal position in sky coordinates (0–360 degrees).
+    y : float
+        Vertical position in sky coordinates (0–90 degrees, horizon to zenith).
+    magnitude : float
+        Apparent brightness. Lower = brighter (astronomical convention).
+        Range roughly 0.0 (very bright) to 8.0 (very dim).
+    color_index : float
+        B-V color index that determines star color.
+        Negative = blue-white, 0 = white, positive = yellow/orange/red.
+    """
+
+    # Magnitude limits — stars outside this range are physically implausible
+    MIN_MAGNITUDE = -1.5
+    MAX_MAGNITUDE = 10.0
+
+    def __init__(self, star_id: str, x: float, y: float,
+                 magnitude: float, color_index: float = 0.0):
+        self.star_id = star_id
+        self.x = x
+        self.y = y
+        self.magnitude = magnitude
+        self.color_index = color_index
+        self._validate()
+
+    def _validate(self):
+        """Check for impossible star configurations."""
+        if not (0 <= self.x <= 360):
+            raise InvalidStarError(
+                f"{self.star_id}: x={self.x} out of range [0, 360]"
+            )
+        if not (0 <= self.y <= 90):
+            raise InvalidStarError(
+                f"{self.star_id}: y={self.y} out of range [0, 90]"
+            )
+        if not (self.MIN_MAGNITUDE <= self.magnitude <= self.MAX_MAGNITUDE):
+            raise InvalidStarError(
+                f"{self.star_id}: magnitude={self.magnitude} out of range "
+                f"[{self.MIN_MAGNITUDE}, {self.MAX_MAGNITUDE}]"
+            )
+
+    # ----- visibility & spatial methods -----
+
+    def is_visible(self, threshold: float = 6.0) -> bool:
+        """
+        Determine if this star is visible given a magnitude threshold.
+        Human naked-eye limit is ~6.0; binoculars ~10.0.
+        """
+        return self.magnitude <= threshold
+
+    def distance_to(self, other: "Star") -> float:
+        """
+        Compute angular distance to another star using Euclidean
+        approximation (adequate for our projected sky coordinates).
+        """
+        return float(np.sqrt((self.x - other.x) ** 2 +
+                             (self.y - other.y) ** 2))
+
+    def get_display_color(self) -> str:
+        """
+        Convert color_index to an approximate hex color.
+        Maps B-V index → visual star color.
+        """
+        ci = self.color_index
+        if ci < -0.1:
+            return "#aabfff"   # blue-white (hot stars)
+        elif ci < 0.15:
+            return "#eef0ff"   # white
+        elif ci < 0.45:
+            return "#fffde8"   # yellow-white
+        elif ci < 0.75:
+            return "#fff4b8"   # yellow
+        elif ci < 1.1:
+            return "#ffd78a"   # orange
+        else:
+            return "#ffaa5c"   # red-orange (cool stars)
+
+    def get_display_size(self, base_size: float = 80.0) -> float:
+        """
+        Convert magnitude to a scatter-plot marker size.
+        Brighter stars (lower magnitude) → larger markers.
+        Uses an exponential scale to mimic perceived brightness.
+        """
+        # Flux ratio: each magnitude step ≈ 2.512× brightness change
+        return base_size * (2.512 ** (4.0 - self.magnitude))
+
+    # ----- serialization -----
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain dictionary (JSON-compatible)."""
+        return {
+            "star_id": self.star_id,
+            "x": round(self.x, 4),
+            "y": round(self.y, 4),
+            "magnitude": round(self.magnitude, 4),
+            "color_index": round(self.color_index, 4),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Star":
+        """Reconstruct a Star from a dictionary."""
+        return cls(
+            star_id=data["star_id"],
+            x=data["x"],
+            y=data["y"],
+            magnitude=data["magnitude"],
+            color_index=data.get("color_index", 0.0),
+        )
+
+    def __repr__(self):
+        return (f"Star({self.star_id}, pos=({self.x:.1f}, {self.y:.1f}), "
+                f"mag={self.magnitude:.2f})")
+
+
+# ---------------------------------------------------------------------------
+# Star Field Generator
+# ---------------------------------------------------------------------------
+
+class StarFieldGenerator:
+    """
+    Generates a realistic-feeling random star field using NumPy.
+
+    The key insight is that star magnitudes follow a power-law-like
+    distribution: dim stars vastly outnumber bright ones.  We use a
+    shifted exponential distribution to model this.
+
+    Parameters
+    ----------
+    num_stars : int
+        Total number of stars to generate (default 250).
+    seed : int or None
+        Random seed for reproducibility.
+    x_range : tuple
+        (min, max) for horizontal sky coordinate.
+    y_range : tuple
+        (min, max) for vertical sky coordinate.
+    """
+
+    def __init__(self, num_stars: int = 250, seed: int = None,
+                 x_range: tuple = (0, 360), y_range: tuple = (0, 90)):
+        self.num_stars = num_stars
+        self.seed = seed
+        self.x_range = x_range
+        self.y_range = y_range
+        self.rng = np.random.default_rng(seed)
+
+    def generate(self) -> list:
+        """
+        Generate the full star field and return a list of Star objects.
+
+        Distribution choices:
+        - Positions: uniform across the sky
+        - Magnitudes: exponential (many dim, few bright)
+        - Color indices: normal distribution centered on solar-type stars
+        """
+        # --- Positions: uniform random across the sky ---
+        x_coords = self.rng.uniform(
+            self.x_range[0], self.x_range[1], self.num_stars
+        )
+        y_coords = self.rng.uniform(
+            self.y_range[0], self.y_range[1], self.num_stars
+        )
+
+        # --- Magnitudes: exponential distribution shifted to start near 1 ---
+        # Most stars will be dim (mag 4–7); only a handful will be
+        # bright (mag 1–3).  This mimics real star count distributions.
+        raw_magnitudes = self.rng.exponential(scale=1.5, size=self.num_stars)
+        # Shift up so the bulk sits in the 3–7 range
+        magnitudes = np.clip(raw_magnitudes + 2.5, 0.5, 8.0)
+
+        # --- Color indices: normal distribution ---
+        # Mean ~0.6 (sun-like), std 0.45 gives a nice spread
+        color_indices = self.rng.normal(loc=0.6, scale=0.45,
+                                        size=self.num_stars)
+        color_indices = np.clip(color_indices, -0.4, 2.0)
+
+        # --- Build Star objects ---
+        stars = []
+        for i in range(self.num_stars):
+            star_id = f"star_{i:04d}"
+            try:
+                star = Star(
+                    star_id=star_id,
+                    x=float(x_coords[i]),
+                    y=float(y_coords[i]),
+                    magnitude=float(magnitudes[i]),
+                    color_index=float(color_indices[i]),
+                )
+                stars.append(star)
+            except InvalidStarError as e:
+                # Log and skip any invalid stars (shouldn't happen with
+                # clipping, but defensive coding is good practice)
+                print(f"  Skipping invalid star: {e}")
+
+        self._validate_field(stars)
+        return stars
+
+    def _validate_field(self, stars: list):
+        """Ensure the generated field meets minimum requirements."""
+        if len(stars) < 20:
+            raise StarFieldError(
+                f"Only {len(stars)} valid stars generated; need at least 20."
+            )
+        # Check that we have at least a few bright stars for constellations
+        bright = [s for s in stars if s.magnitude <= 3.5]
+        if len(bright) < 5:
+            raise StarFieldError(
+                f"Only {len(bright)} bright stars (mag ≤ 3.5); "
+                f"need at least 5 for constellation building."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Distance Matrix Utility
+# ---------------------------------------------------------------------------
+
+def compute_distance_matrix(stars: list) -> np.ndarray:
+    """
+    Compute the pairwise Euclidean distance matrix for a list of stars.
+
+    Returns an (N x N) NumPy array where element [i][j] is the angular
+    distance between star i and star j.
+
+    This will be essential for Layer 2's clustering algorithm.
+    """
+    positions = np.array([[s.x, s.y] for s in stars])
+    # Broadcasting trick: diff[i, j] = positions[i] - positions[j]
+    diff = positions[:, np.newaxis, :] - positions[np.newaxis, :, :]
+    return np.sqrt(np.sum(diff ** 2, axis=-1))
+
+
+# ---------------------------------------------------------------------------
+# Star Field Statistics
+# ---------------------------------------------------------------------------
+
+def field_statistics(stars: list) -> dict:
+    """Compute summary statistics for the generated star field."""
+    magnitudes = np.array([s.magnitude for s in stars])
+    colors = np.array([s.color_index for s in stars])
+
+    return {
+        "total_stars": len(stars),
+        "visible_naked_eye": len([s for s in stars if s.is_visible(6.0)]),
+        "bright_stars_mag3": len([s for s in stars if s.magnitude <= 3.0]),
+        "bright_stars_mag4": len([s for s in stars if s.magnitude <= 4.0]),
+        "magnitude_range": (float(magnitudes.min()),
+                            float(magnitudes.max())),
+        "magnitude_mean": float(magnitudes.mean()),
+        "magnitude_median": float(np.median(magnitudes)),
+        "color_index_range": (float(colors.min()), float(colors.max())),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Visualization
+# ---------------------------------------------------------------------------
+
+def plot_star_field(stars: list, title: str = "Generated Star Field",
+                    magnitude_threshold: float = 8.0,
+                    save_path: str = None, show: bool = True):
+    """
+    Plot the star field with realistic colors and sizes.
+
+    Parameters
+    ----------
+    stars : list of Star
+        The stars to plot.
+    title : str
+        Plot title.
+    magnitude_threshold : float
+        Only plot stars brighter than this magnitude.
+    save_path : str or None
+        If given, save the figure to this path.
+    show : bool
+        Whether to display the plot interactively.
+    """
+    # Filter by visibility (list comprehension)
+    visible = [s for s in stars if s.magnitude <= magnitude_threshold]
+
+    # Extract plot data
+    xs = [s.x for s in visible]
+    ys = [s.y for s in visible]
+    sizes = [s.get_display_size(base_size=60) for s in visible]
+    colors = [s.get_display_color() for s in visible]
+
+    # Cap marker sizes so the very brightest don't dominate
+    sizes = [min(s, 800) for s in sizes]
+
+    # --- Build the figure ---
+    fig, ax = plt.subplots(figsize=(16, 8), facecolor="#0a0a1a")
+    ax.set_facecolor("#0a0a1a")
+
+    # Faint background glow for the Milky Way (cosmetic band)
+    milky_way_y = np.linspace(0, 90, 300)
+    milky_way_intensity = np.exp(-0.5 * ((milky_way_y - 45) / 15) ** 2)
+    for i, intensity in enumerate(milky_way_intensity):
+        ax.axhline(y=milky_way_y[i], color="white",
+                    alpha=intensity * 0.012, linewidth=2)
+
+    # Plot stars with glow effect (larger, dimmer circle behind each star)
+    ax.scatter(xs, ys,
+               s=[sz * 3 for sz in sizes],
+               c=colors, alpha=0.08, edgecolors="none")  # glow
+    ax.scatter(xs, ys,
+               s=sizes,
+               c=colors, alpha=0.9, edgecolors="none", zorder=5)  # star
+
+    # Axis formatting
+    ax.set_xlim(0, 360)
+    ax.set_ylim(0, 90)
+    ax.set_xlabel("Azimuth (degrees)", color="white", fontsize=11)
+    ax.set_ylabel("Altitude (degrees)", color="white", fontsize=11)
+    ax.set_title(title, color="white", fontsize=16, fontweight="bold",
+                 pad=15)
+    ax.tick_params(colors="white", labelsize=9)
+    for spine in ax.spines.values():
+        spine.set_color("#333355")
+
+    # Gridlines
+    ax.grid(True, alpha=0.1, color="white", linestyle="--")
+
+    # Stats annotation
+    stats = field_statistics(stars)
+    stats_text = (
+        f"Total stars: {stats['total_stars']}  |  "
+        f"Naked-eye visible: {stats['visible_naked_eye']}  |  "
+        f"Bright (mag ≤ 3): {stats['bright_stars_mag3']}"
+    )
+    ax.text(180, -6, stats_text, ha="center", color="#888899",
+            fontsize=9, style="italic")
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight",
+                    facecolor=fig.get_facecolor())
+        print(f"  Saved plot → {save_path}")
+
+    if show:
+        plt.show()
+
+    plt.close(fig)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# JSON Serialization
+# ---------------------------------------------------------------------------
+
+def save_stars_json(stars: list, filepath: str, seed: int = None):
+    """Save a star field to a JSON file."""
+    data = {
+        "metadata": {
+            "num_stars": len(stars),
+            "generator_seed": seed,
+            "layer": 1,
+            "description": "Raw star field — Layer 1 output",
+        },
+        "stars": {s.star_id: s.to_dict() for s in stars},
+    }
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"  Saved {len(stars)} stars → {filepath}")
+
+
+def load_stars_json(filepath: str) -> list:
+    """Load a star field from a JSON file."""
+    with open(filepath, "r") as f:
+        data = json.load(f)
+    stars = [Star.from_dict(s) for s in data["stars"].values()]
+    print(f"  Loaded {len(stars)} stars ← {filepath}")
+    return stars
+
+
+# ---------------------------------------------------------------------------
+# Main — Demo / Test
+# ---------------------------------------------------------------------------
+
+def main():
+    print("=" * 60)
+    print("  CONSTELLATION MYTHOLOGY GENERATOR")
+    print("  Layer 1: Star Field Generation")
+    print("=" * 60)
+
+    # --- Generate ---
+    SEED = 42
+    NUM_STARS = 250
+
+    print(f"\n  Generating {NUM_STARS} stars (seed={SEED})...")
+    generator = StarFieldGenerator(num_stars=NUM_STARS, seed=SEED)
+    stars = generator.generate()
+
+    # --- Statistics ---
+    stats = field_statistics(stars)
+    print(f"\n  Field Statistics:")
+    print(f"    Total stars generated : {stats['total_stars']}")
+    print(f"    Naked-eye visible     : {stats['visible_naked_eye']}")
+    print(f"    Bright (mag ≤ 3.0)    : {stats['bright_stars_mag3']}")
+    print(f"    Bright (mag ≤ 4.0)    : {stats['bright_stars_mag4']}")
+    print(f"    Magnitude range       : {stats['magnitude_range'][0]:.2f}"
+          f" – {stats['magnitude_range'][1]:.2f}")
+    print(f"    Magnitude mean        : {stats['magnitude_mean']:.2f}")
+
+    # --- Visibility filtering with list comprehensions ---
+    print(f"\n  Visibility Filtering (list comprehensions):")
+    naked_eye = [s for s in stars if s.is_visible(6.0)]
+    binocular = [s for s in stars if s.is_visible(8.0)]
+    constellation_candidates = [s for s in stars if s.magnitude <= 3.5]
+    print(f"    Naked-eye (mag ≤ 6.0) : {len(naked_eye)} stars")
+    print(f"    Binoculars (mag ≤ 8.0): {len(binocular)} stars")
+    print(f"    Constellation cands   : {len(constellation_candidates)} stars")
+
+    # --- Show brightest stars ---
+    print(f"\n  Top 10 Brightest Stars:")
+    brightest = sorted(stars, key=lambda s: s.magnitude)[:10]
+    for s in brightest:
+        print(f"    {s.star_id}  mag={s.magnitude:5.2f}  "
+              f"pos=({s.x:6.1f}, {s.y:5.1f})  "
+              f"color={s.get_display_color()}")
+
+    # --- Distance matrix preview ---
+    print(f"\n  Distance Matrix:")
+    dist_matrix = compute_distance_matrix(stars)
+    print(f"    Shape: {dist_matrix.shape}")
+    print(f"    Min nonzero distance : {dist_matrix[dist_matrix > 0].min():.2f}°")
+    print(f"    Max distance         : {dist_matrix.max():.2f}°")
+    print(f"    Mean distance        : {dist_matrix[dist_matrix > 0].mean():.2f}°")
+
+    # --- Closest-neighbor preview (teaser for Layer 2 clustering) ---
+    print(f"\n  Nearest Neighbors (constellation candidates):")
+    cand_ids = [stars.index(s) for s in constellation_candidates]
+    for s in constellation_candidates[:5]:
+        idx = stars.index(s)
+        distances = dist_matrix[idx]
+        # Mask self-distance and non-candidate stars
+        neighbor_dists = [
+            (stars[j], distances[j])
+            for j in cand_ids
+            if j != idx
+        ]
+        neighbor_dists.sort(key=lambda pair: pair[1])
+        nearest = neighbor_dists[0]
+        print(f"    {s.star_id} → nearest bright neighbor: "
+              f"{nearest[0].star_id} ({nearest[1]:.1f}° away)")
+
+    # --- Save to JSON ---
+    json_path = "star_field.json"
+    print(f"\n  Saving to JSON...")
+    save_stars_json(stars, json_path, seed=SEED)
+
+    # --- Reload and verify ---
+    print(f"  Reloading from JSON...")
+    reloaded = load_stars_json(json_path)
+    assert len(reloaded) == len(stars), "Round-trip mismatch!"
+    print(f"  Round-trip verified: {len(reloaded)} stars match.")
+
+    # --- Error handling demo ---
+    print(f"\n  Error Handling Demo:")
+    try:
+        bad_star = Star("bad_001", x=400, y=50, magnitude=3.0)
+    except InvalidStarError as e:
+        print(f"    Caught InvalidStarError: {e}")
+
+    try:
+        bad_star2 = Star("bad_002", x=100, y=50, magnitude=-5.0)
+    except InvalidStarError as e:
+        print(f"    Caught InvalidStarError: {e}")
+
+    # --- Plot ---
+    print(f"\n  Generating star field plot...")
+    plot_star_field(
+        stars,
+        title=f"Generated Star Field  —  {NUM_STARS} Stars (seed={SEED})",
+        save_path="star_field.png",
+        show=False,
+    )
+
+    print(f"\n{'=' * 60}")
+    print(f"  Layer 1 complete. Ready for Layer 2 (clustering).")
+    print(f"{'=' * 60}")
+    return stars
+
+if __name__ == "__main__":
+    stars = main()
+
+##PART 2
+# --- Layer 2: Clustering Algorithm ---
+
+# We will implement a basic DBSCAN-like (density-based) clustering for stars based on their (x, y) coordinates.
+# A cluster is defined as a set of stars where each has at least min_pts neighbors within eps distance.
+import math
+def euclidean_distance(star1, star2):
+    """Returns the Euclidean distance between two stars (projected positions)."""
+    dx = star1.x - star2.x
+    dy = star1.y - star2.y
+    return math.sqrt(dx*dx + dy*dy)
+
+def region_query(stars, star, eps):
+    """Find all stars within eps distance of the given star."""
+    neighbors = []
+    for s in stars:
+        if s is not star and euclidean_distance(star, s) <= eps:
+            neighbors.append(s)
+    return neighbors
+
+def expand_cluster(stars, star, neighbors, cluster_id, eps, min_pts, star_labels, clusters):
+    """Recursive helper to expand clusters."""
+    clusters[cluster_id].append(star)
+    star_labels[star] = cluster_id
+    i = 0
+    while i < len(neighbors):
+        neighbor = neighbors[i]
+        if neighbor not in star_labels:
+            star_labels[neighbor] = cluster_id
+            clusters[cluster_id].append(neighbor)
+            neighbor_neighbors = region_query(stars, neighbor, eps)
+            if len(neighbor_neighbors) >= min_pts:
+                neighbors += [n for n in neighbor_neighbors if n not in neighbors]
+        elif star_labels[neighbor] == -1:  # previously noise
+            star_labels[neighbor] = cluster_id
+            clusters[cluster_id].append(neighbor)
+        i += 1
+
+def dbscan_cluster(stars, eps=30, min_pts=4):
+    """
+    Density-based clustering of stars.
+    - eps: maximum distance to be considered a neighbor (in the same units as star.x/y)
+    - min_pts: minimum stars required to form a cluster
+    """
+    clusters = []
+    star_labels = {}  # star → cluster_id or -1 for noise
+    cluster_id = 0
+
+    for star in stars:
+        if star in star_labels:
+            continue
+        neighbors = region_query(stars, star, eps)
+        if len(neighbors) < min_pts:
+            star_labels[star] = -1  # mark as noise
+        else:
+            clusters.append([])
+            expand_cluster(stars, star, neighbors, cluster_id, eps, min_pts, star_labels, clusters)
+            cluster_id += 1
+
+    return clusters, star_labels
+
+# --- Demonstration of clustering ---
+
+print("\n" + "="*60)
+print("  Layer 2: Clustering Star Field")
+print("="*60)
+
+# You may want to tweak eps/min_pts depending on your star field's scale/density!
+CLUSTERS_EPS = 35     # 'distance' threshold (adjust as appropriate)
+CLUSTERS_MIN_PTS = 3  # minimum stars to form a cluster
+
+clusters, star_labels = dbscan_cluster(stars, eps=CLUSTERS_EPS, min_pts=CLUSTERS_MIN_PTS)
+
+print(f"\n  Found {len(clusters)} clusters (with eps={CLUSTERS_EPS}, min_pts={CLUSTERS_MIN_PTS})")
+for i, cluster in enumerate(clusters):
+    print(f"    Cluster {i+1}: {len(cluster)} stars")
+num_noise = sum(1 for cid in star_labels.values() if cid == -1)
+print(f"    Noise points: {num_noise} stars")
+
+# (Optional) Visualization: Re-plot with cluster colors (if matplotlib available)
+import matplotlib.pyplot as plt
+import random
+def plot_clusters(stars, clusters, star_labels, title="Star Field Clusters", save_path=None):
+    """Visualize clusters in a circular sky-dome view (polar projection).
+    
+    Zenith (altitude 90°) is at center; horizon (0°) is at the edge.
+    Azimuth runs around the circle (0° = North at top).
+    """
+    cmap = plt.cm.tab20
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection='polar'))
+    
+    # Convert (azimuth, altitude) to polar: r = 90-altitude (zenith=center), theta = azimuth
+   # Azimuth 0° = North. set_theta_zero_location('N') puts North at top.
+    
+    # Plot each cluster
+    for idx, cluster in enumerate(clusters):
+        color = cmap(idx % 20)
+        radii = [90 - s.y for s in cluster]      # altitude: 90→center, 0→edge
+        thetas = [np.radians(s.x) for s in cluster]  # azimuth in radians
+        mags = [s.magnitude for s in cluster]
+        sizes = [20 + (6 - m) * 10 for m in mags]
+        ax.scatter(thetas, radii, c=[color], s=sizes, alpha=0.7, label=f"Cluster {idx+1}")
+    
+    # Plot noise
+    noise_stars = [star for star, cid in star_labels.items() if cid == -1]
+    if noise_stars:
+        noise_r = [90 - s.y for s in noise_stars]
+        noise_theta = [np.radians(s.x) for s in noise_stars]
+        ax.scatter(noise_theta, noise_r, c='k', s=10, label="Noise", alpha=0.3, marker='x')
+    
+    ax.set_ylim(0, 90)  # horizon at edge, zenith at center
+    ax.set_theta_zero_location('N')  # North at top
+    ax.set_theta_direction(-1)       # clockwise (standard compass)
+    ax.set_facecolor('#0a0a1a')
+    fig.patch.set_facecolor('#0a0a1a')
+    ax.tick_params(colors='white', labelsize=9)
+    ax.set_title(title, color='white', fontsize=14, pad=20)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.15, 1), facecolor='#1a1a2e', labelcolor='white')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
+    plt.show()
+
+plot_clusters(stars, clusters, star_labels, title="Layer 2: Clustering of Star Field", save_path="star_field_clusters.png")
+
+print("\nLayer 2 complete. Ready for further analysis in subsequent layers!")
+# Modify the plot_clusters function call to make the plot appear "oval" (elliptical) like the sky.
+# We'll set a manual aspect ratio (e.g., 0.6) to create an oval impression.
+
+def plot_clusters_oval(stars, clusters, star_labels, title="Star Field Clusters (Oval View)", save_path=None, aspect_ratio=0.6):
+    """Visualize clusters in 2D, coloring each cluster differently, with an oval sky appearance."""
+    cmap = plt.cm.tab20
+    plt.figure(figsize=(10, 6))
+    
+    # Map each star to its plot color by cluster id (-1 = noise)
+    for idx, cluster in enumerate(clusters):
+        color = cmap(idx % 20)
+        x = [star.x for star in cluster]
+        y = [star.y for star in cluster]
+        mag = [star.magnitude for star in cluster]
+        plt.scatter(x, y, c=[color], s=[20 + (6 - m) * 10 for m in mag], alpha=0.7, label=f"Cluster {idx+1}")
+    # plot noise
+    noise_x = [star.x for star, cid in star_labels.items() if cid == -1]
+    noise_y = [star.y for star, cid in star_labels.items() if cid == -1]
+    if noise_x:
+        plt.scatter(noise_x, noise_y, c='k', s=10, label="Noise", alpha=0.3, marker='x')
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title(title)
+    plt.legend()
+    # Set oval (ellipse) appearance by adjusting the aspect ratio
+    plt.gca().set_aspect(aspect_ratio)  # <--- key line for oval look
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path)
+    plt.show()
+
+# Example usage:
+# plot_clusters_oval_with_ellipse(stars, clusters, star_labels, title="Layer 2: Clustering of Star Field (Oval Dome)", save_path="star_field_clusters_ellipse.png")
