@@ -74,6 +74,7 @@ def main():
         "**Select a constellation** from the dropdown under the map to see the name and mythology."
     )
 #this is the session that stores the mythology cache and the storyteller llm. To get the api key there is a secrets file where it is stored. This section also retrieves it from there. 
+#The api_key may not save, so if not you can open the secrets folder with cursor and enter the Astro 1221 key there. I did not want to upload the Astro Key to the repository since it is supposed to be limited to our class. 
     if "mythology_cache" not in st.session_state:
         st.session_state.mythology_cache = {}
     if "storyteller" not in st.session_state:
